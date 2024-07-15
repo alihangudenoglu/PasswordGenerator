@@ -1,0 +1,262 @@
+﻿@page "/"
+
+@using System.Text
+@inject IJSRuntime JSRuntime
+@inject IToastService ToastService
+
+<PageTitle>Home</PageTitle>
+
+<div class="d-flex flex-column align-items-center vh-100">
+    <div class="card shadow-lg w-100 mx-2 mx-md-0 mb-3" style="max-width: 960px;">
+        <div class="card-header gradient-header text-white d-flex align-items-center animate-header">
+            <span class="me-2 fs-4 animate-icon">🔒</span>
+            <h3 class="mb-0 animate-title">Password Generator</h3>
+        </div>
+        <div class="card-body animate-card">
+
+            <div class="input-group mb-4">
+                <input @bind="password" readonly="readonly" type="text" class="form-control form-control-lg" placeholder="Generated Password">
+                <button @onmouseenter="@(() => OnEmojiHover("copy"))" @onmouseleave="@OnEmojiMouseLeft" @onclick="@(() => CopyPasswordToClipboard(string.Empty))" class="btn btn-outline-secondary my-clickable-button @onHoverCopyCss animate-button" id="basic-addon2">📄</button>
+                <button @onclick="HandleGeneratePasswordClick" @onmouseenter="@(() => OnEmojiHover("generate"))" @onmouseleave="@OnEmojiMouseLeft" class="btn btn-outline-secondary my-clickable-button @onHoverGenerateCss animate-button" id="basic-addon3">🔄</button>
+                <button @onclick="HandleSavePasswordClick" @onmouseenter="@(() => OnEmojiHover("save"))" @onmouseleave="@OnEmojiMouseLeft" class="btn btn-outline-secondary my-clickable-button @onHoverSaveCss animate-button" id="basic-addon4">💾</button>
+            </div>
+
+            <div class="mb-4 animate-checkboxes">
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" @bind="@includeNumbers" @oninput="@((args) => HandleCheckboxOnChange(args,ref includeNumbers))">
+                    <label class="form-check-label">Numbers</label>
+                </div>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" @bind="@includeLowercase" @oninput="@((args) => HandleCheckboxOnChange(args,ref includeLowercase))">
+                    <label class="form-check-label">Lowercase</label>
+                </div>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" @bind="@includeUppercase" @oninput="@((args) => HandleCheckboxOnChange(args,ref includeUppercase))">
+                    <label class="form-check-label">Uppercase</label>
+                </div>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" @bind="@includeSpecialChars" @oninput="@((args) => HandleCheckboxOnChange(args,ref includeSpecialChars))">
+                    <label class="form-check-label">Special Chars</label>
+                </div>
+            </div>
+
+            <div class="container">
+                <h5 class="mb-3">Password Length</h5>
+                <div class="row align-items-center">
+                    <div class="col-md-2 mb-2 mb-md-0">
+                        <input @bind=@passwordLength type="number" class="form-control form-control-sm" min="6" max="50" @oninput="HandlePasswordLengthInputOnChange"/>
+                    </div>
+                    <div class="col-md-6 mb-2 mb-md-0">
+                        <input type="range" class="form-range" step="1" min="6" max="50" @bind="passwordLength" @oninput="HandleRangeOnChange"/>
+                    </div>
+                    <div class="progress col-md-4 mb-2 mb-md-0">
+                        <div class="progress-bar" role="progressbar" style="width: @passwordStrength%;" aria-valuenow="@passwordStrength" aria-valuemin="0" aria-valuemax="100">@passwordStrength%</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-lg w-100 mx-2 mx-md-0" style="max-width: 960px;">
+        <div class="card-header gradient-header text-white d-flex align-items-center animate-header">
+            <span class="me-2 fs-4 animate-icon">💾</span>
+            <h3 class="mb-0 animate-title">Saved Passwords</h3>
+        </div>
+        <div class="card-body animate-card">
+            @if (savedPasswords.Any())
+            {
+                <ul class="list-group">
+                    @foreach (var savedPassword in savedPasswords)
+                    {
+                        <li class="list-group-item animate-list-item d-flex justify-content-between">
+                            <span>@savedPassword</span>
+                            <div>
+                                <button class="btn btn-outline-info ms-auto" type="button" @onclick="@(() => CopyPasswordToClipboard(savedPassword))">📄</button>
+                                <button class="btn btn-outline-danger ms-auto" type="button" @onclick="@(() => HandleDeleteButtonClick(savedPassword))">🗑️</button>
+                            </div>
+                        </li>
+                    }
+                </ul>
+            }
+            else
+            {
+                <h5 class="text-center text-muted">There aren't any saved passwords.</h5>
+            }
+        </div>
+    </div>
+</div>
+
+@code
+{
+    private int passwordStrength = 0;
+    private string password = string.Empty;
+    private int passwordLength = 6;
+    private HashSet<string> savedPasswords = [];
+
+    private string onHoverCopyCss = string.Empty;
+    private string onHoverGenerateCss = string.Empty;
+    private string onHoverSaveCss = string.Empty;
+
+    private static Random random = new Random();
+    private static StringBuilder stringBuilder = new StringBuilder();
+
+    private bool includeLowercase = true;
+    private bool includeUppercase = true;
+    private bool includeNumbers = false;
+    private bool includeSpecialChars = false;
+
+    private const string lowercaseLetters = "abcdefghijklmnopqrstuvwxyz";
+    private const string uppercaseLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    private const string numbers = "0123456789";
+    private const string specialCharacters = "!@#$%&*()_+-={};:?";
+
+    protected override void OnInitialized()
+    {
+        GeneratePassword();
+
+        base.OnInitialized();
+    }
+    private void CalculatePasswordStrength()
+    {
+
+        int score = 0;
+
+        if (passwordLength >= 8) score += 15;
+        if (passwordLength >= 16) score += 10;
+        if (includeLowercase) score += 15;
+        if (includeUppercase) score += 20;
+        if (includeNumbers) score += 20;
+        if (includeSpecialChars) score += 20;
+
+        passwordStrength = score;
+    }
+
+    private void HandleDeleteButtonClick(string passwordToDelete)
+    {
+        savedPasswords.Remove(passwordToDelete);
+
+        ToastService.ShowSuccess("The selected password deleted.");
+    }
+
+    async Task CopyPasswordToClipboard(string? passwordToCopy)
+    {
+        if (string.IsNullOrWhiteSpace(passwordToCopy))
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", password);
+
+        else
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", passwordToCopy);
+
+
+        ToastService.ShowSuccess("The password copied.");
+    }
+
+
+    private void HandlePasswordLengthInputOnChange(ChangeEventArgs args)
+    {
+        if (args.Value is null)
+            return;
+
+        passwordLength = Convert.ToInt32(args.Value);
+
+        GeneratePassword();
+
+    }
+
+    private void HandleRangeOnChange(ChangeEventArgs args)
+    {
+        if (args.Value is null)
+            return;
+
+        passwordLength = Convert.ToInt32(args.Value);
+
+        GeneratePassword();
+    }
+
+    private void HandleSavePasswordClick()
+    {
+        if (string.IsNullOrEmpty(password) || savedPasswords.Any(x => x == password))
+            return;
+
+        savedPasswords.Add(password);
+
+        ToastService.ShowInfo("The selected password saved!");
+    }
+
+    private void HandleCheckboxOnChange(ChangeEventArgs args, ref bool checkBoxValue)
+    {
+        checkBoxValue = (bool)args.Value;
+
+        GeneratePassword();
+    }
+
+    private void HandleGeneratePasswordClick()
+    {
+        GeneratePassword();
+    }
+
+    private void GeneratePassword()
+    {
+        stringBuilder.Clear();
+
+        var validChars = new StringBuilder();
+
+        if (includeLowercase)
+            validChars.Append(lowercaseLetters);
+
+        if (includeUppercase)
+            validChars.Append(uppercaseLetters);
+
+        if (includeNumbers)
+            validChars.Append(numbers);
+
+        if (includeSpecialChars)
+            validChars.Append(specialCharacters);
+
+        if (!includeUppercase && !includeLowercase && !includeNumbers && !includeSpecialChars)
+        {
+            includeNumbers = true;
+            validChars.Append(numbers);
+        }
+
+
+        for (int i = 0; i < passwordLength; i++)
+        {
+            var randomIndex = random.Next(0, validChars.Length);
+
+            stringBuilder.Append(validChars[randomIndex]);
+
+        }
+
+        password = stringBuilder.ToString();
+        CalculatePasswordStrength();
+    }
+
+    private void OnEmojiHover(string iconType)
+    {
+        switch (iconType)
+        {
+            case "copy":
+                onHoverCopyCss = "bg-secondary";
+                break;
+
+            case "generate":
+                onHoverGenerateCss = "bg-secondary";
+                break;
+
+            case "save":
+                onHoverSaveCss = "bg-secondary";
+                break;
+
+            default:
+
+                break;
+        }
+    }
+
+    private void OnEmojiMouseLeft()
+    {
+        onHoverCopyCss = string.Empty;
+        onHoverGenerateCss = string.Empty;
+        onHoverSaveCss = string.Empty;
+    }
+}
